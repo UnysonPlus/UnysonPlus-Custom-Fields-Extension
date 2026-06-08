@@ -11,7 +11,7 @@ $manifest['description'] = __(
 	'fw'
 );
 
-$manifest['version']    = '0.1.11';
+$manifest['version']    = '0.1.12';
 $manifest['github_update'] = 'UnysonPlus/UnysonPlus-Custom-Fields-Extension';
 $manifest['display']    = true;
 $manifest['standalone'] = true;
