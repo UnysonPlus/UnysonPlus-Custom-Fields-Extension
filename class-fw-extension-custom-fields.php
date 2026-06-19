@@ -1295,7 +1295,7 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 		?>
 		<div class="wrap fw-ext-custom-fields">
 			<h1 class="wp-heading-inline"><?php esc_html_e( 'Custom Fields', 'fw' ); ?></h1>
-			<p class="description" style="max-width:50em">
+			<p class="description">
 				<?php esc_html_e( 'Attach custom fields to your content. Create a field group, choose which post types it shows on, then add fields. Read a value on the front end with fw_get_field( "field_name" ).', 'fw' ); ?>
 			</p>
 
