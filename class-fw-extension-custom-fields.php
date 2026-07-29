@@ -570,13 +570,314 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 				}
 				return $o;
 
+			case 'code':
+				return array_merge( $base, array(
+					'type'   => 'code-editor',
+					'mode'   => $this->sub_str( $sub, 'mode', 'htmlmixed' ),
+					'height' => $this->sub_int( $sub, 'height', 300 ),
+				) );
+
+			case 'slider':
+				$o = array_merge( $base, array(
+					'type'       => 'slider',
+					'properties' => array(
+						'min'  => $this->sub_num( $sub, 'min', 0 ),
+						'max'  => $this->sub_num( $sub, 'max', 100 ),
+						'step' => $this->sub_num( $sub, 'step', 1 ),
+					),
+				) );
+				if ( isset( $sub['default'] ) && $sub['default'] !== '' && is_numeric( $sub['default'] ) ) {
+					$o['value'] = $sub['default'] + 0;
+				}
+				return $o;
+
+			case 'range':
+				$min = $this->sub_num( $sub, 'min', 0 );
+				$max = $this->sub_num( $sub, 'max', 100 );
+				return array_merge( $base, array(
+					'type'       => 'range-slider',
+					'value'      => array( 'from' => $min, 'to' => $max ),
+					'properties' => array( 'min' => $min, 'max' => $max, 'step' => $this->sub_num( $sub, 'step', 1 ) ),
+				) );
+
+			case 'unit':
+				$units = array_values( array_filter( array_map( 'trim', explode( ',', $this->sub_str( $sub, 'units', 'px, em, rem' ) ) ), 'strlen' ) );
+				if ( empty( $units ) ) {
+					$units = array( 'px' );
+				}
+				$o = array_merge( $base, array( 'type' => 'unit-input', 'units' => $units ) );
+				foreach ( array( 'min', 'max', 'step' ) as $k ) {
+					if ( isset( $sub[ $k ] ) && $sub[ $k ] !== '' && is_numeric( $sub[ $k ] ) ) {
+						$o[ $k ] = $sub[ $k ] + 0;
+					}
+				}
+				return $o;
+
+			case 'oembed':
+				return array_merge( $base, array( 'type' => 'oembed' ) );
+
+			case 'icon':
+				return array_merge( $base, array( 'type' => 'icon' ) );
+
+			case 'image-choice':
+				return array_merge( $base, array(
+					'type'    => 'image-picker',
+					'blank'   => $this->sub_bool( $sub, 'blank', true ),
+					'choices' => $this->parse_image_choices_str( isset( $sub['choices'] ) ? $sub['choices'] : '' ),
+				) );
+
+			case 'relation-post':
+			case 'relation-term':
+			case 'relation-user':
+				return $this->build_relation_option( $base, $sub, $type );
+
+			case 'datetime':
+				return array_merge( $base, array(
+					'type'            => 'datetime-picker',
+					'datetime-picker' => array( 'format' => $this->sub_str( $sub, 'format', 'Y/m/d H:i' ) ),
+				) );
+
+			case 'time':
+				return array_merge( $base, array(
+					'type'            => 'time-picker',
+					'datetime-picker' => array( 'format' => $this->sub_str( $sub, 'format', 'H:i' ) ),
+				) );
+
+			case 'date-range':
+				return array_merge( $base, array( 'type' => 'datetime-range' ) );
+
+			case 'color-preset':
+				// Element colors should consume the theme's color presets rather than
+				// a one-off hex, so they stay tied to Theme Settings. The helper lives
+				// in the shortcodes extension; fall back to a plain picker without it.
+				if ( function_exists( 'sc_color_field_compact' ) ) {
+					return array_merge(
+						sc_color_field_compact( array(
+							'label' => $base['label'],
+							'kind'  => $this->sub_str( $sub, 'kind', 'text' ) === 'bg' ? 'bg' : 'text',
+						) ),
+						array( 'desc' => $base['desc'], 'help' => $base['help'] )
+					);
+				}
+				return array_merge( $base, array( 'type' => 'color-picker' ) );
+
+			case 'rgba-color':
+				$o = array_merge( $base, array( 'type' => 'rgba-color-picker' ) );
+				if ( ! empty( $sub['default'] ) ) {
+					$o['value'] = (string) $sub['default'];
+				}
+				return $o;
+
+			case 'map':
+				// The map option type needs a Google Maps API key. Without one it
+				// renders an empty grey box with no explanation, so fall back to a
+				// pair of readable coordinate inputs and say why.
+				if ( ! $this->map_api_key_set() ) {
+					return array_merge( $base, array(
+						'type' => 'text',
+						'desc' => trim( $base['desc'] . ' ' . __( '(A Google Maps API key is not set, so this is a plain text field. Add a key in the Map option settings to get the map picker.)', 'fw' ) ),
+					) );
+				}
+				return array_merge( $base, array( 'type' => 'map' ) );
+
+			case 'list':
+				return array_merge( $base, array(
+					'type'            => 'addable-option',
+					'add-button-text' => $this->sub_str( $sub, 'add_text', __( 'Add', 'fw' ) ),
+					'sortable'        => true,
+					'option'          => array(
+						'type'            => $this->sub_bool( $sub, 'multiline', false ) ? 'textarea' : 'text',
+						'dynamic_content' => false,
+					),
+				) );
+
 			case 'repeater':
 				return $this->build_repeater_option( $base, $sub );
+
+			case 'repeater-popup':
+				return $this->build_repeater_option( $base, $sub, true );
 
 			case 'text':
 			default:
 				return $this->text_with_extras( $base, $sub );
 		}
+	}
+
+	/**
+	 * Build a relationship field.
+	 *
+	 * Unyson's `multi-select` already does AJAX-searched post / term / user
+	 * pickers via its `population` argument; Custom Fields only ever used it in
+	 * plain `array` mode. These three types just expose what the option type
+	 * could already do. The saved value is an array of IDs (or user logins).
+	 *
+	 * @param array  $base
+	 * @param array  $sub
+	 * @param string $type
+	 *
+	 * @return array
+	 */
+	private function build_relation_option( $base, $sub, $type ) {
+		$map = array(
+			'relation-post' => 'posts',
+			'relation-term' => 'taxonomy',
+			'relation-user' => 'users',
+		);
+
+		$source = $this->as_list( isset( $sub['source'] ) ? $sub['source'] : array() );
+
+		// An empty source means "anything of this kind" rather than "nothing".
+		if ( empty( $source ) ) {
+			if ( $type === 'relation-post' ) {
+				$source = array_keys( $this->available_post_type_choices() );
+			} elseif ( $type === 'relation-term' ) {
+				$source = array_keys( $this->taxonomy_choices() );
+			} else {
+				$source = array_keys( $this->user_role_choices() );
+			}
+		}
+
+		return array_merge( $base, array(
+			'type'        => 'multi-select',
+			'population'  => $map[ $type ],
+			'source'      => $source,
+			'limit'       => max( 1, $this->sub_int( $sub, 'limit', $type === 'relation-user' ? 1 : 10 ) ),
+			'prepopulate' => 20,
+			'show-type'   => count( $source ) > 1,
+		) );
+	}
+
+	/**
+	 * Public taxonomies, for the term-relationship source picker.
+	 *
+	 * @return array
+	 */
+	private function taxonomy_choices() {
+		$choices = array();
+
+		foreach ( get_taxonomies( array( 'public' => true ), 'objects' ) as $tax ) {
+			$label = ( isset( $tax->labels->singular_name ) && $tax->labels->singular_name )
+				? $tax->labels->singular_name
+				: $tax->name;
+			$choices[ $tax->name ] = $label . ' (' . $tax->name . ')';
+		}
+
+		return $choices;
+	}
+
+	/**
+	 * Editable roles, for the user-relationship source picker.
+	 *
+	 * @return array
+	 */
+	private function user_role_choices() {
+		$choices = array();
+
+		if ( ! function_exists( 'get_editable_roles' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/user.php';
+		}
+
+		foreach ( get_editable_roles() as $slug => $role ) {
+			$choices[ $slug ] = isset( $role['name'] ) ? translate_user_role( $role['name'] ) : $slug;
+		}
+
+		return $choices;
+	}
+
+	/**
+	 * Is a Google Maps API key configured?
+	 *
+	 * @return bool
+	 */
+	private function map_api_key_set() {
+		if ( ! class_exists( 'FW_Option_Type_Map' ) || ! method_exists( 'FW_Option_Type_Map', 'api_key' ) ) {
+			return false;
+		}
+
+		$key = FW_Option_Type_Map::api_key();
+
+		return is_string( $key ) && trim( $key ) !== '';
+	}
+
+	/**
+	 * Parse the image-choice textarea ("value | image URL" per line).
+	 *
+	 * @param string $raw
+	 *
+	 * @return array
+	 */
+	private function parse_image_choices_str( $raw ) {
+		$out = array();
+
+		foreach ( preg_split( '/\r\n|\r|\n/', (string) $raw ) as $line ) {
+			$line = trim( $line );
+			if ( $line === '' ) {
+				continue;
+			}
+
+			$parts = array_map( 'trim', explode( '|', $line, 2 ) );
+			$value = sanitize_key( $parts[0] );
+			$url   = isset( $parts[1] ) ? esc_url_raw( $parts[1] ) : '';
+
+			if ( $value !== '' && $url !== '' ) {
+				$out[ $value ] = array( 'small' => $url );
+			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * The shared "Sub fields" instruction, used by both repeater variants.
+	 *
+	 * @return string
+	 */
+	private function subfields_desc() {
+		return __( 'One per line: name | Label | type. Type is one of: text, textarea, wysiwyg, number, url, email, image, file, gallery, oembed, icon, color, date, datetime, time, switch, checkbox (default: text). Example: "price | Price | number".', 'fw' );
+	}
+
+	/**
+	 * Read a string sub-option from a multi-picker choice value.
+	 *
+	 * @param array  $sub
+	 * @param string $key
+	 * @param string $default
+	 *
+	 * @return string
+	 */
+	private function sub_str( $sub, $key, $default ) {
+		if ( ! isset( $sub[ $key ] ) ) {
+			return $default;
+		}
+		$value = trim( (string) $sub[ $key ] );
+
+		return $value !== '' ? $value : $default;
+	}
+
+	/**
+	 * Read an integer sub-option from a multi-picker choice value.
+	 *
+	 * @param array  $sub
+	 * @param string $key
+	 * @param int    $default
+	 *
+	 * @return int
+	 */
+	private function sub_int( $sub, $key, $default ) {
+		return ( isset( $sub[ $key ] ) && is_numeric( $sub[ $key ] ) ) ? (int) $sub[ $key ] : (int) $default;
+	}
+
+	/**
+	 * Read a numeric sub-option (int or float) from a multi-picker choice value.
+	 *
+	 * @param array  $sub
+	 * @param string $key
+	 * @param float  $default
+	 *
+	 * @return int|float
+	 */
+	private function sub_num( $sub, $key, $default ) {
+		return ( isset( $sub[ $key ] ) && is_numeric( $sub[ $key ] ) ) ? $sub[ $key ] + 0 : $default;
 	}
 
 	/**
@@ -589,7 +890,7 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 	 *
 	 * @return array
 	 */
-	private function build_repeater_option( $base, $sub ) {
+	private function build_repeater_option( $base, $sub, $popup = false ) {
 		$subdefs = $this->parse_subfields( isset( $sub['subfields'] ) ? $sub['subfields'] : '' );
 
 		$box_options = array();
@@ -604,6 +905,21 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 			// No valid sub-fields defined yet: a single text column so the
 			// repeater still renders instead of erroring.
 			$box_options['value'] = array( 'type' => 'text', 'label' => __( 'Value', 'fw' ), 'dynamic_content' => false );
+		}
+
+		if ( $popup ) {
+			// Same rows, edited in a modal instead of inline. Better when a row has
+			// many sub-fields, where the inline boxes get unwieldy.
+			return array_merge( $base, array(
+				'type'            => 'addable-popup',
+				'width'           => 'full',
+				'add-button-text' => __( 'Add Row', 'fw' ),
+				'popup-title'     => $base['label'] !== '' ? $base['label'] : __( 'Row', 'fw' ),
+				'size'            => 'medium',
+				'sortable'        => true,
+				'template'        => $this->repeater_template( $subdefs, true ),
+				'popup-options'   => $box_options,
+			) );
 		}
 
 		return array_merge( $base, array(
@@ -675,6 +991,14 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 				return array_merge( $base, array( 'type' => 'color-picker' ) );
 			case 'date':
 				return array_merge( $base, array( 'type' => 'date-picker' ) );
+			case 'datetime':
+				return array_merge( $base, array( 'type' => 'datetime-picker' ) );
+			case 'time':
+				return array_merge( $base, array( 'type' => 'time-picker' ) );
+			case 'oembed':
+				return array_merge( $base, array( 'type' => 'oembed' ) );
+			case 'icon':
+				return array_merge( $base, array( 'type' => 'icon' ) );
 			case 'switch':
 				return array_merge( $base, array( 'type' => 'switch' ) );
 			case 'checkbox':
@@ -695,14 +1019,16 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 	 *
 	 * @return string
 	 */
-	private function repeater_template( $subdefs ) {
+	private function repeater_template( $subdefs, $popup = false ) {
 		foreach ( $subdefs as $sf ) {
 			if ( in_array( $sf['type'], array( 'text', 'textarea', 'number', 'url', 'email' ), true ) ) {
 				return '{{- ' . $sf['name'] . ' }}';
 			}
 		}
 
-		return '';
+		// An addable-popup row with no template renders a blank strip, so give it
+		// something; addable-box is happy with an empty template.
+		return $popup ? __( 'Row', 'fw' ) : '';
 	}
 
 	/**
@@ -835,26 +1161,61 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 	 */
 	private function field_type_choices() {
 		return array(
+			// Text
 			'text'         => __( 'Text', 'fw' ),
 			'medium-text'  => __( 'Text (medium width)', 'fw' ),
 			'short-text'   => __( 'Text (short width)', 'fw' ),
 			'textarea'     => __( 'Text Area', 'fw' ),
 			'wysiwyg'      => __( 'WYSIWYG Editor', 'fw' ),
-			'number'       => __( 'Number', 'fw' ),
 			'url'          => __( 'URL', 'fw' ),
 			'email'        => __( 'Email', 'fw' ),
+			'code'         => __( 'Code / HTML', 'fw' ),
+
+			// Numbers
+			'number'       => __( 'Number', 'fw' ),
+			'slider'       => __( 'Slider (number)', 'fw' ),
+			'range'        => __( 'Range (from - to)', 'fw' ),
+			'unit'         => __( 'Measurement (value + unit)', 'fw' ),
+
+			// Media
 			'image'        => __( 'Image', 'fw' ),
 			'file'         => __( 'File', 'fw' ),
 			'gallery'      => __( 'Gallery (multiple images)', 'fw' ),
+			'oembed'       => __( 'Embed (video / media URL)', 'fw' ),
+			'icon'         => __( 'Icon', 'fw' ),
+
+			// Choice
 			'select'       => __( 'Select', 'fw' ),
 			'short-select' => __( 'Select (short width)', 'fw' ),
 			'radio'        => __( 'Radio', 'fw' ),
-			'checkbox'   => __( 'Checkbox (on/off)', 'fw' ),
-			'checkboxes' => __( 'Checkboxes (multiple)', 'fw' ),
-			'switch'     => __( 'Switch (on/off)', 'fw' ),
-			'color'      => __( 'Color', 'fw' ),
-			'date'       => __( 'Date', 'fw' ),
-			'repeater'   => __( 'Repeater (rows of sub-fields)', 'fw' ),
+			'image-choice' => __( 'Image choice (visual radio)', 'fw' ),
+			'checkbox'     => __( 'Checkbox (on/off)', 'fw' ),
+			'checkboxes'   => __( 'Checkboxes (multiple)', 'fw' ),
+			'switch'       => __( 'Switch (on/off)', 'fw' ),
+
+			// Relationships
+			'relation-post' => __( 'Related posts', 'fw' ),
+			'relation-term' => __( 'Taxonomy terms', 'fw' ),
+			'relation-user' => __( 'Users', 'fw' ),
+
+			// Date & time
+			'date'         => __( 'Date', 'fw' ),
+			'datetime'     => __( 'Date & time', 'fw' ),
+			'time'         => __( 'Time', 'fw' ),
+			'date-range'   => __( 'Date range (from - to)', 'fw' ),
+
+			// Color
+			'color'        => __( 'Color', 'fw' ),
+			'color-preset' => __( 'Color (theme preset)', 'fw' ),
+			'rgba-color'   => __( 'Color with transparency', 'fw' ),
+
+			// Location
+			'map'          => __( 'Location (map)', 'fw' ),
+
+			// Repeating
+			'list'           => __( 'List (repeating single value)', 'fw' ),
+			'repeater'       => __( 'Repeater (rows of sub-fields)', 'fw' ),
+			'repeater-popup' => __( 'Repeater (rows edited in a popup)', 'fw' ),
 		);
 	}
 
@@ -934,11 +1295,170 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 			'date'       => array(
 				'default' => array( 'type' => 'date-picker', 'label' => __( 'Default value', 'fw' ) ),
 			),
+			'code'       => array(
+				'mode'   => array(
+					'type'    => 'select',
+					'label'   => __( 'Language', 'fw' ),
+					'value'   => 'htmlmixed',
+					'choices' => array(
+						'htmlmixed'  => __( 'HTML', 'fw' ),
+						'css'        => __( 'CSS', 'fw' ),
+						'javascript' => __( 'JavaScript', 'fw' ),
+						'php'        => __( 'PHP', 'fw' ),
+						'json'       => __( 'JSON', 'fw' ),
+						'xml'        => __( 'XML', 'fw' ),
+					),
+				),
+				'height' => array( 'type' => 'number', 'label' => __( 'Editor height (px)', 'fw' ), 'value' => 300 ),
+			),
+
+			'slider'     => array(
+				'min'     => array( 'type' => 'number', 'label' => __( 'Min', 'fw' ), 'value' => 0 ),
+				'max'     => array( 'type' => 'number', 'label' => __( 'Max', 'fw' ), 'value' => 100 ),
+				'step'    => array( 'type' => 'number', 'label' => __( 'Step', 'fw' ), 'value' => 1 ),
+				'default' => array( 'type' => 'number', 'label' => __( 'Default value', 'fw' ) ),
+			),
+			'range'      => array(
+				'min'  => array( 'type' => 'number', 'label' => __( 'Min', 'fw' ), 'value' => 0 ),
+				'max'  => array( 'type' => 'number', 'label' => __( 'Max', 'fw' ), 'value' => 100 ),
+				'step' => array( 'type' => 'number', 'label' => __( 'Step', 'fw' ), 'value' => 1 ),
+			),
+			'unit'       => array(
+				'units' => array(
+					'type'            => 'medium-text',
+					'label'           => __( 'Units', 'fw' ),
+					'desc'            => __( 'Comma-separated, e.g. "m2, ft2" or "px, em, rem". The first one is the default.', 'fw' ),
+					'value'           => 'px, em, rem',
+					'dynamic_content' => false,
+				),
+				'min'   => array( 'type' => 'number', 'label' => __( 'Min', 'fw' ) ),
+				'max'   => array( 'type' => 'number', 'label' => __( 'Max', 'fw' ) ),
+				'step'  => array( 'type' => 'number', 'label' => __( 'Step', 'fw' ) ),
+			),
+
+			'oembed'     => array(),
+			'icon'       => array(),
+
+			'image-choice' => array(
+				'choices' => array(
+					'type'            => 'textarea',
+					'label'           => __( 'Choices', 'fw' ),
+					'desc'            => __( 'One per line, as "value | image URL". The image is the tile the editor clicks.', 'fw' ),
+					'dynamic_content' => false,
+				),
+				'blank'   => array(
+					'type'  => 'checkbox',
+					'label' => __( 'Allow none', 'fw' ),
+					'text'  => __( 'Let the selected tile be deselected', 'fw' ),
+					'value' => true,
+				),
+			),
+
+			'relation-post' => array(
+				'source' => array(
+					'type'        => 'multi-select',
+					'label'       => __( 'Post types', 'fw' ),
+					'desc'        => __( 'Which post types can be picked. Leave empty to allow any.', 'fw' ),
+					'population'  => 'array',
+					'choices'     => $this->available_post_type_choices(),
+					'prepopulate' => 100,
+				),
+				'limit'  => array(
+					'type'  => 'number',
+					'label' => __( 'Maximum items', 'fw' ),
+					'desc'  => __( 'Set this to 1 for a single relationship.', 'fw' ),
+					'value' => 10,
+				),
+			),
+			'relation-term' => array(
+				'source' => array(
+					'type'        => 'multi-select',
+					'label'       => __( 'Taxonomies', 'fw' ),
+					'desc'        => __( 'Which taxonomies terms can be picked from.', 'fw' ),
+					'population'  => 'array',
+					'choices'     => $this->taxonomy_choices(),
+					'prepopulate' => 100,
+				),
+				'limit'  => array( 'type' => 'number', 'label' => __( 'Maximum items', 'fw' ), 'value' => 10 ),
+			),
+			'relation-user' => array(
+				'source' => array(
+					'type'        => 'multi-select',
+					'label'       => __( 'Roles', 'fw' ),
+					'desc'        => __( 'Which user roles can be picked. Leave empty to allow any.', 'fw' ),
+					'population'  => 'array',
+					'choices'     => $this->user_role_choices(),
+					'prepopulate' => 100,
+				),
+				'limit'  => array( 'type' => 'number', 'label' => __( 'Maximum items', 'fw' ), 'value' => 1 ),
+			),
+
+			'datetime'   => array(
+				'format' => array(
+					'type'            => 'medium-text',
+					'label'           => __( 'Format', 'fw' ),
+					'desc'            => __( 'PHP-style format used by the picker, e.g. "Y/m/d H:i".', 'fw' ),
+					'value'           => 'Y/m/d H:i',
+					'dynamic_content' => false,
+				),
+			),
+			'time'       => array(
+				'format' => array(
+					'type'            => 'medium-text',
+					'label'           => __( 'Format', 'fw' ),
+					'desc'            => __( 'PHP-style format used by the picker, e.g. "H:i".', 'fw' ),
+					'value'           => 'H:i',
+					'dynamic_content' => false,
+				),
+			),
+			'date-range' => array(),
+
+			'color-preset' => array(
+				'kind' => array(
+					'type'    => 'select',
+					'label'   => __( 'Preset list', 'fw' ),
+					'desc'    => __( 'Which set of theme color presets to offer.', 'fw' ),
+					'value'   => 'text',
+					'choices' => array(
+						'text' => __( 'Text colors', 'fw' ),
+						'bg'   => __( 'Background colors', 'fw' ),
+					),
+				),
+			),
+			'rgba-color' => array(
+				'default' => array( 'type' => 'rgba-color-picker', 'label' => __( 'Default value', 'fw' ) ),
+			),
+
+			'map'        => array(),
+
+			'list'       => array(
+				'multiline' => array(
+					'type'  => 'checkbox',
+					'label' => __( 'Multi-line rows', 'fw' ),
+					'text'  => __( 'Use a text area for each row instead of a single-line input', 'fw' ),
+					'value' => false,
+				),
+				'add_text'  => array(
+					'type'            => 'medium-text',
+					'label'           => __( 'Add button text', 'fw' ),
+					'value'           => 'Add',
+					'dynamic_content' => false,
+				),
+			),
+
 			'repeater'   => array(
 				'subfields' => array(
 					'type'            => 'textarea',
 					'label'           => __( 'Sub fields', 'fw' ),
-					'desc'            => __( 'One per line: name | Label | type. Type is one of: text, textarea, wysiwyg, number, url, email, image, file, gallery, color, date, switch, checkbox (default: text). Example: "price | Price | number".', 'fw' ),
+					'desc'            => $this->subfields_desc(),
+					'dynamic_content' => false,
+				),
+			),
+			'repeater-popup' => array(
+				'subfields' => array(
+					'type'            => 'textarea',
+					'label'           => __( 'Sub fields', 'fw' ),
+					'desc'            => $this->subfields_desc(),
 					'dynamic_content' => false,
 				),
 			),
@@ -951,18 +1471,16 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 	 * @return array
 	 */
 	private function available_post_type_choices() {
-		$skip = array(
-			'attachment', 'revision', 'nav_menu_item', 'custom_css',
-			'customize_changeset', 'oembed_cache', 'user_request', 'wp_block',
-			'wp_template', 'wp_template_part', 'wp_global_styles', 'wp_navigation',
-			'wp_font_family', 'wp_font_face',
-		);
+		// Delegates to the shared helper in framework/includes/post-type-choices.php.
+		// This list (and its skip-set of WordPress-internal types) used to be
+		// duplicated here and in the Post Types extension, so it drifted every time
+		// core added an internal type.
+		if ( function_exists( 'fw_upw_post_type_choices' ) ) {
+			return fw_upw_post_type_choices();
+		}
 
 		$choices = array();
 		foreach ( get_post_types( array(), 'objects' ) as $pt ) {
-			if ( in_array( $pt->name, $skip, true ) ) {
-				continue;
-			}
 			$label = ( isset( $pt->labels->singular_name ) && $pt->labels->singular_name )
 				? $pt->labels->singular_name
 				: $pt->name;
