@@ -42,6 +42,15 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 		// Optionally expose field values in the REST API.
 		add_action( 'rest_api_init', array( $this, '_action_register_rest_fields' ) );
 
+		// Expose field values to the block editor via the Block Bindings API (WP 6.5+), so core
+		// blocks — Paragraph, Heading, Image, Button — can pull their content from an Unyson+ field
+		// with zero custom blocks. Registered on `init`, where WordPress registers its own sources.
+		add_action( 'init', array( $this, '_action_register_block_bindings' ) );
+
+		// The block-editor picker: a sidebar control on those core blocks to bind an attribute to an
+		// Unyson+ field without hand-editing block markup. Only loads when there are fields to bind.
+		add_action( 'enqueue_block_editor_assets', array( $this, '_action_enqueue_binding_picker' ) );
+
 		if ( is_admin() ) {
 			// Priority 20: after the parent Unyson+ menu (10), before
 			// Shortcodes / Component Presets (100). The Post Types extension
@@ -180,6 +189,168 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 		}
 
 		return $out;
+	}
+
+	/* ---------------------------------------------------------------------- *
+	 * Block Bindings (WP 6.5+)
+	 * ---------------------------------------------------------------------- */
+
+	/**
+	 * @internal
+	 * Register the Unyson+ Block Bindings source. Core blocks bind an attribute (Paragraph
+	 * `content`, Heading `content`, Image `url`, Button `text`/`url`, …) to a field with:
+	 *
+	 *     "metadata": { "bindings": {
+	 *         "content": { "source": "unysonplus/field", "args": { "key": "subtitle" } }
+	 *     } }
+	 *
+	 * so a template renders its own data with no custom block. No-op on WordPress < 6.5.
+	 */
+	public function _action_register_block_bindings() {
+		if ( ! function_exists( 'register_block_bindings_source' ) ) {
+			return; // WordPress < 6.5 — the API doesn't exist.
+		}
+		register_block_bindings_source( 'unysonplus/field', array(
+			'label'              => __( 'Unyson+ Field', 'fw' ),
+			'get_value_callback' => array( $this, '_binding_get_value' ),
+			'uses_context'       => array( 'postId', 'postType' ),
+		) );
+	}
+
+	/**
+	 * @internal
+	 * Block Bindings resolver: the value of the Unyson+ field named in `args.key` for the block's
+	 * context post, coerced to the string a bound attribute expects.
+	 *
+	 * @param array          $source_args    { key: <field name> }
+	 * @param WP_Block|mixed  $block_instance the block being rendered (carries context)
+	 * @param string          $attribute_name the bound attribute (content / url / text / alt …)
+	 *
+	 * @return string|null the value, or null to leave the attribute unbound
+	 */
+	public function _binding_get_value( $source_args, $block_instance, $attribute_name ) {
+		$key = ( is_array( $source_args ) && isset( $source_args['key'] ) )
+			? $this->sanitize_field_name( (string) $source_args['key'] )
+			: '';
+		if ( $key === '' || ! function_exists( 'fw_get_db_post_option' ) ) {
+			return null;
+		}
+
+		$ctx     = ( is_object( $block_instance ) && isset( $block_instance->context ) && is_array( $block_instance->context ) ) ? $block_instance->context : array();
+		$post_id = isset( $ctx['postId'] ) ? (int) $ctx['postId'] : (int) get_the_ID();
+		if ( ! $post_id ) {
+			return null;
+		}
+		$post_type = isset( $ctx['postType'] ) ? (string) $ctx['postType'] : (string) get_post_type( $post_id );
+
+		// Only resolve keys that belong to an ACTIVE group targeting this post type — never expose an
+		// arbitrary stored option as bindable.
+		if ( ! $this->is_bindable_field( $key, $post_type ) ) {
+			return null;
+		}
+
+		return $this->coerce_binding_value( fw_get_db_post_option( $post_id, $key ), (string) $attribute_name );
+	}
+
+	/**
+	 * Is $key a field of an ACTIVE field group whose location includes $post_type?
+	 *
+	 * @param string $key       sanitized field name
+	 * @param string $post_type
+	 *
+	 * @return bool
+	 */
+	private function is_bindable_field( $key, $post_type ) {
+		foreach ( $this->get_field_groups() as $group ) {
+			if ( ! is_array( $group ) || ! $this->group_active( $group ) ) {
+				continue;
+			}
+			if ( '' !== $post_type && ! in_array( $post_type, $this->parse_post_types( isset( $group['location'] ) ? $group['location'] : array() ), true ) ) {
+				continue;
+			}
+			$fields = ( isset( $group['fields'] ) && is_array( $group['fields'] ) ) ? $group['fields'] : array();
+			foreach ( $fields as $field ) {
+				if ( is_array( $field ) && isset( $field['name'] ) && $this->sanitize_field_name( $field['name'] ) === $key ) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Coerce a stored field value to the scalar string a bound block attribute needs. An image /
+	 * file field stores an array — bind its `url`; a non-scalar with nothing bindable returns null
+	 * so the attribute is left untouched.
+	 *
+	 * @param mixed  $val
+	 * @param string $attribute_name
+	 *
+	 * @return string|null
+	 */
+	private function coerce_binding_value( $val, $attribute_name ) {
+		if ( is_array( $val ) ) {
+			if ( isset( $val['url'] ) && '' !== (string) $val['url'] ) {
+				return (string) $val['url'];
+			}
+			return null;
+		}
+		if ( is_bool( $val ) ) {
+			return $val ? '1' : '';
+		}
+		return is_scalar( $val ) ? (string) $val : null;
+	}
+
+	/**
+	 * @internal
+	 * Enqueue the block-editor binding picker — a sidebar control that sets an attribute's
+	 * `metadata.bindings` to the `unysonplus/field` source on core blocks. Skipped when there
+	 * are no bindable fields (so a site without field groups loads nothing extra).
+	 */
+	public function _action_enqueue_binding_picker() {
+		$fields = $this->bindable_fields_for_editor();
+		if ( empty( $fields ) ) {
+			return;
+		}
+		$handle = 'unysonplus-bindings-picker';
+		wp_enqueue_script(
+			$handle,
+			$this->locate_URI( '/static/js/bindings-picker.js' ),
+			array( 'wp-element', 'wp-hooks', 'wp-block-editor', 'wp-components', 'wp-compose', 'wp-i18n', 'wp-data' ),
+			$this->manifest->get_version(),
+			true
+		);
+		wp_localize_script( $handle, 'upwcBindings', array( 'fields' => $fields ) );
+	}
+
+	/**
+	 * The fields a block can bind to, for the editor picker: one entry per unique field name across
+	 * ACTIVE groups, with its label and the post types its group targets (the picker filters by the
+	 * post being edited). Mirrors what `is_bindable_field()` will accept at render time.
+	 *
+	 * @return array[] list of { key, label, types[] }
+	 */
+	private function bindable_fields_for_editor() {
+		$out = array();
+		foreach ( $this->get_field_groups() as $group ) {
+			if ( ! is_array( $group ) || ! $this->group_active( $group ) ) {
+				continue;
+			}
+			$types  = $this->parse_post_types( isset( $group['location'] ) ? $group['location'] : array() );
+			$fields = ( isset( $group['fields'] ) && is_array( $group['fields'] ) ) ? $group['fields'] : array();
+			foreach ( $fields as $field ) {
+				if ( ! is_array( $field ) || empty( $field['name'] ) ) {
+					continue;
+				}
+				$key = $this->sanitize_field_name( $field['name'] );
+				if ( '' === $key || isset( $out[ $key ] ) ) {
+					continue;
+				}
+				$label       = ( isset( $field['label'] ) && '' !== trim( (string) $field['label'] ) ) ? (string) $field['label'] : (string) $field['name'];
+				$out[ $key ] = array( 'key' => $key, 'label' => $label, 'types' => $types );
+			}
+		}
+		return array_values( $out );
 	}
 
 	/**

@@ -11,7 +11,7 @@ $manifest['description'] = __(
 	'fw'
 );
 
-$manifest['version']    = '0.1.15';
+$manifest['version']    = '0.1.18';
 $manifest['github_update'] = 'UnysonPlus/UnysonPlus-Custom-Fields-Extension';
 $manifest['display']    = true;
 $manifest['standalone'] = true;
@@ -28,6 +28,23 @@ $manifest['requires_wp']  = '5.8';
 
 /**
  * Changelog ----------------------------------------------------------------
+ *
+ * 0.1.18 - Block Bindings support (WP 6.5+). Registers an `unysonplus/field`
+ *          binding source so core blocks - Paragraph, Heading, Image, Button -
+ *          can pull their content/url from a Custom Fields value with no custom
+ *          block: bind an attribute with source `unysonplus/field` and
+ *          `args.key = <field name>`. The resolver reads the value with the same
+ *          `fw_get_db_post_option()` the REST field uses, keyed off the block's
+ *          post context (postId/postType), and coerces it to what the attribute
+ *          needs (an image/file field binds its URL). Only fields of an ACTIVE
+ *          group targeting the post's type resolve - an unknown key returns null
+ *          rather than exposing arbitrary stored options. A block-editor picker
+ *          adds a "Unyson+ Field Binding" panel to those core blocks so a field
+ *          can be bound from the sidebar, not just in block markup - covering
+ *          Paragraph/Heading text, Button label + link, and Image link + alt.
+ *          This makes the
+ *          field data layer a first-class citizen of the block editor and is the
+ *          foundation for the converter's data-driven block-theme output.
  *
  * 0.1.15 - Eighteen new field types, most of them exposing option types the
  *          framework already shipped but Custom Fields never offered. The
