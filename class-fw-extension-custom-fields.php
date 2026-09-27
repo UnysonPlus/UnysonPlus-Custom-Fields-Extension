@@ -35,6 +35,9 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 	 * @internal
 	 */
 	public function _init() {
+		// AI Assistant abilities (only registered while that extension is active).
+		require_once dirname( __FILE__ ) . '/includes/ai-abilities.php';
+
 		// Inject each matching group's fields into the post edit screen. The
 		// framework applies this filter when building meta boxes and when saving.
 		add_filter( 'fw_post_options', array( $this, '_filter_inject_fields' ), 10, 2 );

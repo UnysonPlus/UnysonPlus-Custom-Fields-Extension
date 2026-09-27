@@ -11,7 +11,7 @@ $manifest['description'] = __(
 	'fw'
 );
 
-$manifest['version']    = '0.1.18';
+$manifest['version']    = '0.1.19';
 $manifest['github_update'] = 'UnysonPlus/UnysonPlus-Custom-Fields-Extension';
 $manifest['display']    = true;
 $manifest['standalone'] = true;
@@ -28,6 +28,12 @@ $manifest['requires_wp']  = '5.8';
 
 /**
  * Changelog ----------------------------------------------------------------
+ *
+ * 0.1.19 - AI Assistant abilities. With the AI Assistant extension active, the AI can
+ *         work with custom fields: custom-fields-list, custom-fields-save-group (validated against the
+ *         Field Groups editor schema) and custom-fields-set-values — undoable through undo_change / page revisions.
+ *         See includes/ai-abilities.php.
+ *
  *
  * 0.1.18 - Block Bindings support (WP 6.5+). Registers an `unysonplus/field`
  *          binding source so core blocks - Paragraph, Heading, Image, Button -
