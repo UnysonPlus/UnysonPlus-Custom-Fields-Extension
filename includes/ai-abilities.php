@@ -230,7 +230,7 @@ if ( ! function_exists( 'fw_ext_custom_fields_ai_register' ) ) :
 		} else {
 			$groups[ $index ] = $row;
 		}
-		$rev = fw_ai_snapshot( array( 'options' => array( fw_ext_custom_fields_ai_option() ) ), 'unysonplus/custom-fields-save-group', sprintf( '%s field group "%s"', $index === null ? 'Created' : 'Updated', $title ) );
+		$rev = ! function_exists( 'fw_ai_snapshot' ) ? 0 : fw_ai_snapshot( array( 'options' => array( fw_ext_custom_fields_ai_option() ) ), 'unysonplus/custom-fields-save-group', sprintf( '%s field group "%s"', $index === null ? 'Created' : 'Updated', $title ) );
 		fw_set_db_ext_settings_option( 'custom-fields', FW_Extension_Custom_Fields::OPTION_ID, $groups );
 		return array(
 			'ok'               => true,
@@ -265,7 +265,7 @@ if ( ! function_exists( 'fw_ext_custom_fields_ai_register' ) ) :
 		foreach ( array_keys( $values ) as $name ) {
 			$keys[] = 'fw_option:' . $name;
 		}
-		$rev = fw_ai_snapshot( array( 'post_meta' => array( $post_id => $keys ) ), 'unysonplus/custom-fields-set-values', sprintf( 'Set %s on "%s"', implode( ', ', array_keys( $values ) ), get_the_title( $post_id ) ) );
+		$rev = ! function_exists( 'fw_ai_snapshot' ) ? 0 : fw_ai_snapshot( array( 'post_meta' => array( $post_id => $keys ) ), 'unysonplus/custom-fields-set-values', sprintf( 'Set %s on "%s"', implode( ', ', array_keys( $values ) ), get_the_title( $post_id ) ) );
 		foreach ( $values as $name => $v ) {
 			fw_set_db_post_option( $post_id, $name, $v );
 		}
