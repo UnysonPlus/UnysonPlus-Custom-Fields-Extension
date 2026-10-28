@@ -163,7 +163,8 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 	 */
 	public function _rest_get_fields( $post_arr ) {
 		$post_id   = isset( $post_arr['id'] ) ? (int) $post_arr['id'] : 0;
-		$post_type = isset( $post_arr['type'] ) ? (string) $post_arr['type'] : '';
+		// Read the type from the post, not the response: `?_fields=` can leave `type` out.
+		$post_type = $post_id ? (string) get_post_type( $post_id ) : '';
 		$out       = array();
 
 		if ( ! $post_id ) {
