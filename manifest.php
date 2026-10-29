@@ -11,7 +11,7 @@ $manifest['description'] = __(
 	'fw'
 );
 
-$manifest['version']    = '0.1.21';
+$manifest['version']    = '0.1.23';
 $manifest['github_update'] = 'UnysonPlus/UnysonPlus-Custom-Fields-Extension';
 $manifest['display']    = true;
 $manifest['standalone'] = true;
@@ -28,6 +28,13 @@ $manifest['requires_wp']  = '5.8';
 
 /**
  * Changelog ----------------------------------------------------------------
+ *
+ * 0.1.23 - REST API control per field, and a schema. Each field has a "Show in
+ *         REST API" checkbox (on by default), so a private value can stay out of
+ *         the API while the rest of its group is in it. The unysonplus_fields REST
+ *         field now publishes a JSON schema (one typed property per exposed field)
+ *         instead of none, so clients can generate types from /wp-json. Values
+ *         pass through the new fw_ext_custom_fields_rest_values filter (0.1.22).
  *
  * 0.1.19 - AI Assistant abilities. With the AI Assistant extension active, the AI can
  *         work with custom fields: custom-fields-list, custom-fields-save-group (validated against the

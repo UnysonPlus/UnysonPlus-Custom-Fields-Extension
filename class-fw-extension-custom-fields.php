@@ -126,6 +126,69 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 	}
 
 	/**
+	 * Whether a field goes into the REST API when its group does. Fields saved before the switch
+	 * existed default to on.
+	 */
+	private function field_show_in_rest( $field ) {
+		return array_key_exists( 'show_in_rest', $field ) ? (bool) $field['show_in_rest'] : true;
+	}
+
+	/**
+	 * JSON schema for `unysonplus_fields`: one property per REST-enabled field (across every
+	 * REST-enabled group), typed from its field type, so clients can generate types from /wp-json.
+	 */
+	private function rest_schema() {
+		$image = array(
+			'type'       => 'object',
+			'properties' => array(
+				'attachment_id' => array( 'type' => array( 'integer', 'string' ) ),
+				'url'           => array( 'type' => 'string' ),
+			),
+		);
+		$types = array(
+			'number' => array( 'type' => 'number' ), 'slider' => array( 'type' => 'number' ),
+			'checkbox' => array( 'type' => 'boolean' ), 'switch' => array( 'type' => 'boolean' ),
+			'image' => $image, 'file' => $image,
+			'gallery' => array( 'type' => 'array', 'items' => $image ),
+			'checkboxes' => array( 'type' => 'object' ),
+			'range' => array( 'type' => 'object' ), 'unit' => array( 'type' => 'object' ), 'icon' => array( 'type' => 'object' ),
+			'color-preset' => array( 'type' => 'object' ), 'map' => array( 'type' => array( 'object', 'string' ) ),
+			'date-range' => array( 'type' => array( 'object', 'array' ) ),
+			'relation-post' => array( 'type' => 'array', 'items' => array( 'type' => array( 'integer', 'string' ) ) ),
+			'relation-term' => array( 'type' => 'array', 'items' => array( 'type' => array( 'integer', 'string' ) ) ),
+			'relation-user' => array( 'type' => 'array', 'items' => array( 'type' => array( 'integer', 'string' ) ) ),
+			'list' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+			'repeater' => array( 'type' => 'array', 'items' => array( 'type' => 'object' ) ),
+			'repeater-popup' => array( 'type' => 'array', 'items' => array( 'type' => 'object' ) ),
+		);
+
+		$properties = array();
+		foreach ( $this->get_field_groups() as $group ) {
+			if ( ! is_array( $group ) || ! $this->group_active( $group ) || ! $this->group_show_in_rest( $group ) ) {
+				continue;
+			}
+			foreach ( ( isset( $group['fields'] ) && is_array( $group['fields'] ) ) ? $group['fields'] : array() as $field ) {
+				$name = is_array( $field ) && isset( $field['name'] ) ? $this->sanitize_field_name( $field['name'] ) : '';
+				if ( $name === '' || ! $this->field_show_in_rest( $field ) ) {
+					continue;
+				}
+				$type   = isset( $field['field_type']['type'] ) ? (string) $field['field_type']['type'] : 'text';
+				$schema = isset( $types[ $type ] ) ? $types[ $type ] : array( 'type' => 'string' );
+				$schema['description'] = isset( $field['label'] ) ? wp_strip_all_tags( (string) $field['label'] ) : $name;
+				$properties[ $name ] = $schema;
+			}
+		}
+
+		return array(
+			'description' => __( 'Custom Fields values (groups with Show in REST API on).', 'fw' ),
+			'type'        => 'object',
+			'context'     => array( 'view', 'edit' ),
+			'readonly'    => true,
+			'properties'  => $properties,
+		);
+	}
+
+	/**
 	 * @internal
 	 * Register a `unysonplus_fields` REST field on every post type that has at
 	 * least one active group opted into REST.
@@ -148,7 +211,7 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 
 		register_rest_field( array_keys( $post_types ), 'unysonplus_fields', array(
 			'get_callback' => array( $this, '_rest_get_fields' ),
-			'schema'       => null,
+			'schema'       => $this->rest_schema(),
 		) );
 	}
 
@@ -185,14 +248,22 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 					continue;
 				}
 				$name = isset( $field['name'] ) ? $this->sanitize_field_name( $field['name'] ) : '';
-				if ( $name === '' ) {
+				if ( $name === '' || ! $this->field_show_in_rest( $field ) ) {
 					continue;
 				}
 				$out[ $name ] = fw_get_db_post_option( $post_id, $name );
 			}
 		}
 
-		return $out;
+		/**
+		 * Filters the `unysonplus_fields` values of a post as the REST API returns them (field name =>
+		 * stored value). The Headless extension uses it to turn image values into ready-to-use objects.
+		 *
+		 * @param array  $out       Field values.
+		 * @param int    $post_id
+		 * @param string $post_type
+		 */
+		return apply_filters( 'fw_ext_custom_fields_rest_values', $out, $post_id, $post_type );
 	}
 
 	/* ---------------------------------------------------------------------- *
@@ -1816,6 +1887,13 @@ class FW_Extension_Custom_Fields extends FW_Extension {
 												'label'           => __( 'Help', 'fw' ),
 												'desc'            => __( 'Optional longer help, shown as a "?" tooltip next to the field.', 'fw' ),
 												'dynamic_content' => false,
+											),
+											'show_in_rest' => array(
+												'type'  => 'checkbox',
+												'label' => __( 'Show in REST API', 'fw' ),
+												'text'  => __( 'Include this field when the group is shown in the REST API', 'fw' ),
+												'desc'  => __( 'Turn off for a private value (an internal note, a cost you calculate from) that should stay out of the public API even though the rest of the group is in it.', 'fw' ),
+												'value' => true,
 											),
 										),
 									),
